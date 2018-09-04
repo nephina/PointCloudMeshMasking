@@ -13,6 +13,25 @@ masking_nearest_neighbor_num = 250 #how many triangles to run through the ray_tr
 ray_triangle_search_width = 0.2 #mm #how far any triangle centroid can be from the testing ray
 stat_filtering_nearest_neighbor_num = 50 #how many particles to 
 
+
+def Geometry_Mask_pycaster(data,stl_file_path): #good for absolute particle masking, slow
+	points = data[:,0:3]
+	xbounds = np.max(points[0])+(0.1*np.ptp(points[0])),np.min(points[0])-(0.1*np.ptp(points[0]))
+	data_shape = np.shape(data)
+	print('\nFinding points inside geometry...')
+	mask_indices = np.zeros(data_shape[0])
+	for point in range(data_shape[0]):
+		ray_segment = np.hstack((points[point,:],xbounds[0], points[point,1:3])) #define the line segment as a ray heading upwards in the z direction from any given point, terminating at the top of the bounding box around the pointcloud
+		intersection_number = 0
+		caster = rayCaster.fromSTL(stl_path,scale=1)
+		intersection_points = caster.castRay(ray_segment[0:3],ray_segment[3:6])
+		intersection_shape = np.shape(intersection_points)
+		if intersection_shape[0] % 2 != 0:
+			mask_indices[point] = 1
+			print('point #',point,'is inside\n')
+	masked_data = data[(mask_indices != 0),:]
+	return masked_data
+
 def Ray_Triangle_Intersection(p0, p1, triangle):
     v0, v1, v2 = triangle
     u = v1 - v0
@@ -43,25 +62,6 @@ def Ray_Triangle_Intersection(p0, p1, triangle):
     if (rI == 0.0):
         return 2
     return 1
-
-def Geometry_Mask_pycaster(data,stl_file_path): #good for absolute particle masking, slow
-	points = data[:,0:3]
-	xbounds = np.max(points[0])+(0.1*np.ptp(points[0])),np.min(points[0])-(0.1*np.ptp(points[0]))
-	data_shape = np.shape(data)
-	print('\nFinding points inside geometry...')
-	mask_indices = np.zeros(data_shape[0])
-	for point in range(data_shape[0]):
-		ray_segment = np.hstack((points[point,:],xbounds[0], points[point,1:3])) #define the line segment as a ray heading upwards in the z direction from any given point, terminating at the top of the bounding box around the pointcloud
-		intersection_number = 0
-		caster = rayCaster.fromSTL(stl_path,scale=1)
-		intersection_points = caster.castRay(ray_segment[0:3],ray_segment[3:6])
-		intersection_shape = np.shape(intersection_points)
-		if intersection_shape[0] % 2 != 0:
-			mask_indices[point] = 1
-			print('point #',point,'is inside\n')
-	masked_data = data[(mask_indices != 0),:]
-	return masked_data
-
 
 def Geometry_Mask_knn_optimized(data,stl_file_path,masking_nearest_neighbor_num,ray_triangle_search_width): #does its best, but will miss some outside particles, and discard some inside particles, is pretty fast
 	points = data[:,0:3]
@@ -133,7 +133,7 @@ filtered_masked_data = masked_data
 #filtered_masked_data = Mode_Filtering(masked_data,stat_filtering_nearest_neighbor_num,stdev_threshold_multiplier)
 filtered_masked_data_shape = np.shape(filtered_masked_data)
 
-with open('Standard Deviation Filtered(200,0.5).ply', mode='w') as Output:
-	Output.write('ply\nformat ascii 1.0\nelement vertex '+str(filtered_masked_data_shape[0]-1)+'\nproperty float x\nproperty float y\nproperty float z\nproperty float nx\nproperty float ny\nproperty float nz\nend_header\n')
+with open('MaskedandFiltered.ply', mode='w') as output:
+	output.write('ply\nformat ascii 1.0\nelement vertex '+str(filtered_masked_data_shape[0]-1)+'\nproperty float x\nproperty float y\nproperty float z\nproperty float nx\nproperty float ny\nproperty float nz\nend_header\n')
 	for i in range(1,filtered_masked_data_shape[0]):
-		Output.write('\n'+str(filtered_masked_data[i,0])+' '+str(filtered_masked_data[i,1])+' '+str(filtered_masked_data[i,2])+' '+str(filtered_masked_data[i,3])+' '+str(filtered_masked_data[i,4])+' '+str(filtered_masked_data[i,5])+'\n')
+		output.write('\n'+str(filtered_masked_data[i,0])+' '+str(filtered_masked_data[i,1])+' '+str(filtered_masked_data[i,2])+' '+str(filtered_masked_data[i,3])+' '+str(filtered_masked_data[i,4])+' '+str(filtered_masked_data[i,5])+'\n')
