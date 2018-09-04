@@ -7,11 +7,12 @@ from pycaster.pycaster import rayCaster
 
 pv3d_file_path = 'Combined.pv3d'
 stl_file_path = 'PhantomMaskforAugust27thData.stl'
+ply_file_name = 'ModeFiltered.ply'
 stdev_threshold_multiplier = 2
 #mad_threshold_multiplier = 50
 masking_nearest_neighbor_num = 250 #how many triangles to run through the ray_triangle_search_width filter This matters a lot for particles that lie near geometry boundaries that are parallel to the x direction, which is the direction that the ray is cast. There are a lot of possible triangles, but the ray only passes through one of them, if you set this number too low, it may not find the correct triangle
-ray_triangle_search_width = 0.2 #mm #how far any triangle centroid can be from the testing ray
-stat_filtering_nearest_neighbor_num = 50 #how many particles to 
+ray_triangle_search_width = 0.3 #mm #how far any triangle centroid can be from the testing ray
+stat_filtering_nearest_neighbor_num = 100 #how many neighbors to use to calculate the statistical model for any given point
 
 
 def Geometry_Mask_pycaster(data,stl_file_path): #good for absolute particle masking, slow
@@ -133,7 +134,7 @@ filtered_masked_data = masked_data
 #filtered_masked_data = Mode_Filtering(masked_data,stat_filtering_nearest_neighbor_num,stdev_threshold_multiplier)
 filtered_masked_data_shape = np.shape(filtered_masked_data)
 
-with open('MaskedandFiltered.ply', mode='w') as output:
+with open(ply_file_name, mode='w') as output:
 	output.write('ply\nformat ascii 1.0\nelement vertex '+str(filtered_masked_data_shape[0]-1)+'\nproperty float x\nproperty float y\nproperty float z\nproperty float nx\nproperty float ny\nproperty float nz\nend_header\n')
 	for i in range(1,filtered_masked_data_shape[0]):
 		output.write('\n'+str(filtered_masked_data[i,0])+' '+str(filtered_masked_data[i,1])+' '+str(filtered_masked_data[i,2])+' '+str(filtered_masked_data[i,3])+' '+str(filtered_masked_data[i,4])+' '+str(filtered_masked_data[i,5])+'\n')
