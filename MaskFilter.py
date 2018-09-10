@@ -14,7 +14,7 @@ ray_triangle_search_width = 0.5 #mm #how far any triangle centroid can be from t
 stat_filtering_nearest_neighbor_num = 100 #how many neighbors to use to calculate the statistical model for any given point
 sparse_filling_nearest_neighbor_num = 2 #keep this as low as possible, otherwise there will be far too many added points (2 is mathematically optimal, may enforce it later)
 min_distance_parameter = 0.01 #how far away to allow nearest particles to be before adding a point in between them
-voxel_size = 0.2 #mm
+voxel_size = 0.5 #mm
 
 
 def Geometry_Mask_pycaster(data,stl_file_path): #good for absolute particle masking, slow (uses vtk's ray intersection algorithm)
@@ -141,7 +141,6 @@ def Median_Filtering(data,stat_filtering_nearest_neighbor_num,stdev_threshold_mu
 		if data[i,3] > (velocity_median[i,0]-velocity_std_dev[i,0]) and data[i,3] < (velocity_median[i,0]+velocity_std_dev[i,0]) and data[i,4] > (velocity_median[i,1]-velocity_std_dev[i,1]) and data[i,4] < (velocity_median[i,1]+velocity_std_dev[i,1]) and data[i,5] > (velocity_median[i,2]-velocity_std_dev[i,2]) and data[i,5] < (velocity_median[i,2]+velocity_std_dev[i,2]): # the data that passes must lie close enough to the median in every dimension that it is within n standard deviation, n defined by user
 			pass_index[i] = i
 			passed+=1
-			print(i)
 		else:
 			pass_index[i] = 0
 			failed+=1
@@ -194,22 +193,31 @@ def Read_PV3D_Files(pv3d_folder_path):
 		print('reading '+file_names[file])
 		data = np.append(data,np.genfromtxt(pv3d_file_path, dtype=np.float64, delimiter=',',skip_header=1),axis=0)
 	return data
+def Write_PV3D_File(data,pv3d_file_name):
+	print('Writing',pv3d_file_name)
+	data_shape = np.shape(data)
+	with open(pv3d_file_name+'.pv3d',mode='w') as output:
+		output.write('Title="'+pv3d_file_name+'" VARIABLES="X","Y","Z","U","V","W","CHC","idParticleMatchA","idParticleMatchB",DATASETAUXDATA DataType="P",DATASETAUXDATA Dimension="3",DATASETAUXDATA HasVelocity="Y",DATASETAUXDATA ExtraDataNumber="2",ZONE T="T1",I='+str(data_shape[0])+',F=POINT,\n')
+		for i in range(data_shape[0]):
+			output.write('\n'+str(data[i,0])+', '+str(data[i,1])+', '+str(data[i,2])+', '+str(data[i,3])+', '+str(data[i,4])+', '+str(data[i,5])+', '+str(data[i,6])+', '+str(data[i,7])+', '+str(data[i,8])+',')
 
 def Write_PLY_File(data,ply_file_name):
 	print('Writing',ply_file_name)
 	data_shape = np.shape(data)
 	with open(ply_file_name, mode='w') as output:
 		output.write('ply\nformat ascii 1.0\nelement vertex '+str(data_shape[0])+'\nproperty float x\nproperty float y\nproperty float z\nproperty float nx\nproperty float ny\nproperty float nz\nend_header\n')
-		for i in range(0,data_shape[0]):
+		for i in range(data_shape[0]):
 			output.write('\n'+str(data[i,0])+' '+str(data[i,1])+' '+str(data[i,2])+' '+str(data[i,3])+' '+str(data[i,4])+' '+str(data[i,5])+'\n')
 
 print('Loading pv3d data...')
 data = np.genfromtxt(pv3d_file_path, dtype=np.float64, delimiter=',',skip_header=1)
 
-data = Geometry_Mask_knn_optimized(data,stl_file_path,masking_nearest_neighbor_num,ray_triangle_search_width)
-Write_PLY_File(data,'MaskedData.ply')
+#data = Geometry_Mask_knn_optimized(data,stl_file_path,masking_nearest_neighbor_num,ray_triangle_search_width)
+#Write_PV3D_File(data,'MaskedData')
 data = Median_Filtering(data,stat_filtering_nearest_neighbor_num,stdev_threshold_multiplier)
-Write_PLY_File(data,'FilteredData.ply')
-data,grid_shape = Generate_Structured_Data(data,voxel_size)
-print(grid_shape)
-Write_PLY_File(data,'StructuredData.ply')
+Write_PV3D_File(data,'FilteredData')
+#data = Fill_Sparse_Areas(data,sparse_filling_nearest_neighbor_num,min_distance_parameter)
+#Write_PV3D_File(data,'SparseFilledData')
+#data,grid_shape = Generate_Structured_Data(data,voxel_size)
+#print(grid_shape[1:] )
+#Write_PLY_File(data,'StructuredData')
