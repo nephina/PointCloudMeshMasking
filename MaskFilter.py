@@ -204,7 +204,7 @@ def Write_PV3D_File(data,pv3d_file_name):
 def Write_PLY_File(data,ply_file_name):
 	print('Writing',ply_file_name)
 	data_shape = np.shape(data)
-	with open(ply_file_name, mode='w') as output:
+	with open(ply_file_name+'.ply', mode='w') as output:
 		output.write('ply\nformat ascii 1.0\nelement vertex '+str(data_shape[0])+'\nproperty float x\nproperty float y\nproperty float z\nproperty float nx\nproperty float ny\nproperty float nz\nend_header\n')
 		for i in range(data_shape[0]):
 			output.write('\n'+str(data[i,0])+' '+str(data[i,1])+' '+str(data[i,2])+' '+str(data[i,3])+' '+str(data[i,4])+' '+str(data[i,5])+'\n')
@@ -212,12 +212,12 @@ def Write_PLY_File(data,ply_file_name):
 print('Loading pv3d data...')
 data = np.genfromtxt(pv3d_file_path, dtype=np.float64, delimiter=',',skip_header=1)
 
-#data = Geometry_Mask_knn_optimized(data,stl_file_path,masking_nearest_neighbor_num,ray_triangle_search_width)
-#Write_PV3D_File(data,'MaskedData')
+data = Geometry_Mask_knn_optimized(data,stl_file_path,masking_nearest_neighbor_num,ray_triangle_search_width)
+Write_PV3D_File(data,'MaskedData')
 data = Median_Filtering(data,stat_filtering_nearest_neighbor_num,stdev_threshold_multiplier)
 Write_PV3D_File(data,'FilteredData')
 #data = Fill_Sparse_Areas(data,sparse_filling_nearest_neighbor_num,min_distance_parameter)
 #Write_PV3D_File(data,'SparseFilledData')
-#data,grid_shape = Generate_Structured_Data(data,voxel_size)
-#print(grid_shape[1:] )
-#Write_PLY_File(data,'StructuredData')
+data,grid_shape = Generate_Structured_Data(data,voxel_size)
+grid_shape = grid_shape[1:]
+Write_PLY_File(data,'StructuredData'+str(grid_shape[::-1]))
