@@ -6,10 +6,10 @@ import os,fnmatch,csv
 import vtk
 from vtk.util.numpy_support import vtk_to_numpy
 
-pv3d_file_path = 'MedianFiltered.pv3d'
+pv3d_file_path = 'Masked.pv3d'
 #pv3d_folder_path = './PV3D Files/'
 stl_file_path = 'PhantomMaskforAugust27thData.stl'
-function_switch_list = 0,0,0,1 #turn on with 1's, in order it is Masking, Mode-filter, Median-filter, Generate Structured Data
+function_switch_list = 0,1,0,1 #turn on with 1's, in order it is Masking, Mode-filter, Median-filter, Generate Structured Data
 
 stdev_threshold_multiplier = 1
 masking_nearest_neighbor_num = 250 #how many triangles to run through the ray_triangle_search_width filter This matters a lot for particles that lie near geometry boundaries that are parallel to the x direction, which is the direction that the ray is cast. There are a lot of possible triangles, but the ray only passes through one of them, if you set this number too low, it may not find the correct triangle
@@ -18,6 +18,8 @@ stat_filtering_nearest_neighbor_num = 100 #how many neighbors to use to calculat
 sparse_filling_nearest_neighbor_num = 2 #keep this as low as possible, otherwise there will be far too many added points (2 is mathematically optimal, may enforce it later)
 min_distance_parameter = 0.01 #how far away to allow nearest particles to be before adding a point in between them
 voxel_size = 0.3 #mm
+fill_holes = 0
+hole_neighbor_level = 1
 
 def Geometry_Mask_ImplicitPolyDataDistance(data,stl_file_path):
 	points = data[:,0:3] #these are the data points you want to mask, you can pass any number of point attributes in "data" as long as the point locations are in the first three indices of each row
@@ -102,8 +104,8 @@ def Geometry_Mask_knn_optimized(data,stl_file_path,masking_nearest_neighbor_num,
 def Mode_Filtering(data,stat_filtering_nearest_neighbor_num,stdev_threshold_multiplier):
 	points = data[:,0:3]
 	data_shape = np.shape(data)
-	print('\nTraining KNN on Masked Pointcloud...')
-	neighbors = NearestNeighbors(n_neighbors=stat_filtering_nearest_neighbor_num, algorithm='auto').fit(points) #run a knn on all the points in the pointcloud
+	print('\nTraining KNN on Pointcloud...')
+	neighbors = NearestNeighbors(n_neighbors=stat_filtering_nearest_neighbor_num, algorithm='auto',n_jobs=-1).fit(points) #run a knn on all the points in the pointcloud
 	distances,indices = neighbors.kneighbors(points) #use the knn results back on the same pointcloud, generating a group of nearest neighboring points for every point in the pointcloud
 	print('\nStatistical Analysis...')
 	velocity_std_dev = stdev_threshold_multiplier*np.std(data[indices,3:6],axis=1) #find the standard deviation of the velocity data for individual x,y,z components
@@ -120,6 +122,37 @@ def Mode_Filtering(data,stat_filtering_nearest_neighbor_num,stdev_threshold_mult
 	pass_index = np.empty(data_shape[0],dtype=int)
 	for i in range(int(data_shape[0])):
 		if data[i,3] > (velocity_mode[i,0]-velocity_std_dev[i,0]) and data[i,3] < (velocity_mode[i,0]+velocity_std_dev[i,0]) and data[i,4] > (velocity_mode[i,1]-velocity_std_dev[i,1]) and data[i,4] < (velocity_mode[i,1]+velocity_std_dev[i,1]) and data[i,5] > (velocity_mode[i,2]-velocity_std_dev[i,2]) and data[i,5] < (velocity_mode[i,2]+velocity_std_dev[i,2]): # the data that passes must lie close enough to the mode in every dimension that it is within n standard deviation, n defined by user
+			pass_index[i] = i
+			passed+=1
+		else:
+			pass_index[i] = 0
+			failed+=1
+	pass_indexed = pass_index[pass_index!=0]
+	filtered_data=data[pass_indexed,:] #use the passindex values to generate a new matrix with only data that passed the mode-filtering bounds
+	return filtered_data
+
+def Mode_Filtering_Histogram(data,stat_filtering_nearest_neighbor_num,stdev_threshold_multiplier):
+	points = data[:,0:3]
+	data_shape = np.shape(data)
+	print('\nTraining KNN on Pointcloud...')
+	neighbors = NearestNeighbors(n_neighbors=stat_filtering_nearest_neighbor_num, algorithm='auto',n_jobs=-1).fit(points) #run a knn on all the points in the pointcloud
+	distances,indices = neighbors.kneighbors(points) #use the knn results back on the same pointcloud, generating a group of nearest neighboring points for every point in the pointcloud
+	print('\nStatistical Analysis...')
+	velocity_std_dev = stdev_threshold_multiplier*np.std(data[indices,3:6],axis=1) #find the standard deviation of the velocity data for individual x,y,z components
+	velocity_mode = np.empty((data_shape[0],3))
+	for point in range(data_shape[0]):
+		for axis in range(3):
+			point_axis_hist = np.histogram(data[indices[point],3:6],20)
+			hist_count = point_axis_hist[0]
+			hist_bins = point_axis_hist[1]
+			velocity_mode[point,axis] = hist_bins[np.argmax(hist_count)]
+		print(point)
+	print('\nTesting Points...')
+	exclusion_velocity = 0.1
+	passed,failed = 0,0
+	pass_index = np.empty(data_shape[0],dtype=int)
+	for i in range(int(data_shape[0])):
+		if data[i,3] > (velocity_mode[i,0]-exclusion_velocity) and data[i,3] < (velocity_mode[i,0]+exclusion_velocity) and data[i,4] > (velocity_mode[i,1]-exclusion_velocity) and data[i,4] < (velocity_mode[i,1]+exclusion_velocity) and data[i,5] > (velocity_mode[i,2]-exclusion_velocity) and data[i,5] < (velocity_mode[i,2]+exclusion_velocity): # the data that passes must lie close enough to the mode in every dimension that it is within n standard deviation, n defined by user
 			pass_index[i] = i
 			passed+=1
 		else:
@@ -169,26 +202,30 @@ def Fill_Sparse_Areas(data,sparse_filling_nearest_neighbor_num,min_distance_para
 	total_data = np.append(data,added_data[np.sum(added_data,axis=1)!=0],axis=1)
 	return total_data
 
-def Generate_Structured_Data(data,voxel_size):
+def Generate_Structured_Data(data,voxel_size,fill_holes,hole_neighbor_level):
 	data_bounds = [np.min(data[:,0]),np.max(data[:,0]),np.min(data[:,1]),np.max(data[:,1]),np.min(data[:,2]),np.max(data[:,2])]
 	x_kernel_bounds = np.arange(data_bounds[0],data_bounds[1]+voxel_size,voxel_size)
 	y_kernel_bounds = np.arange(data_bounds[2],data_bounds[3]+voxel_size,voxel_size)
 	z_kernel_bounds = np.arange(data_bounds[4],data_bounds[5]+voxel_size,voxel_size)
-	grid_shape = np.shape(np.meshgrid(x_kernel_bounds,y_kernel_bounds,z_kernel_bounds))
-	grid = np.vstack(np.meshgrid(x_kernel_bounds,y_kernel_bounds,z_kernel_bounds)).reshape(3,-1).T
-	neighbors = NearestNeighbors(n_neighbors=50, algorithm='auto',n_jobs=-1).fit(data[:,0:3]) #run a knn on all the points in the pointcloud
+	grid_meshed = np.meshgrid(x_kernel_bounds,y_kernel_bounds,z_kernel_bounds)
+	grid_shape = np.shape(grid_meshed)
+	grid = np.vstack(grid_meshed).reshape(3,-1).T
+	neighbors = NearestNeighbors(n_neighbors=100, algorithm='auto',n_jobs=-1).fit(data[:,0:3]) #run a knn on all the points in the pointcloud
 	distances,indices = neighbors.kneighbors(grid)
 	velocity_grid = np.empty(np.shape(grid))
 	for gridpoint in range(len(grid)):
-		kernel_data = data[indices[gridpoint,distances[gridpoint,:]<(voxel_size*(1.8/2))],3:6]
+		kernel_data = data[indices[gridpoint,distances[gridpoint,:]<((voxel_size/2)*(1.8/2)*4)],3:6]
 		if len(kernel_data) >= 1:
 			velocity_grid[gridpoint,:] = np.mean(kernel_data,axis=0)
-			print(np.shape(kernel_data))
 		else:
 			velocity_grid[gridpoint,:] = np.array([0,0,0])
-		#print(gridpoint)
 	structured_grid = np.append(grid,velocity_grid,axis=1)
+	#if fill_holes == 1:
+		#for gridpoint in range(len(structured_grid)):
+		#	if magnitude of point is 0 and it has more than ((hole_neighbor_level^3)-1)-(~0.3((hole_neighbor_level^3)-1)) points nearby with magnitudes != 0
+		#		set U,V,W to the mean of all the nearby points that have magnitudes != 0
 	return structured_grid, grid_shape
+
 def Read_PV3D_Files(pv3d_folder_path):
 	file_names = fnmatch.filter(sorted(os.listdir(pv3d_folder_path)),'*pv3d')
 	print('reading '+file_names[0])
@@ -229,7 +266,7 @@ if function_switch_list[0] == 1:
 	Write_PLY_File(data,'Masked')
 	Write_PV3D_File(data,'Masked')
 if function_switch_list[1] == 1:
-	data = Mode_Filtering(data,stat_filtering_nearest_neighbor_num,stdev_threshold_multiplier)
+	data = Mode_Filtering_Histogram(data,stat_filtering_nearest_neighbor_num,stdev_threshold_multiplier)
 	Write_PLY_File(data,'ModeFiltered')
 	Write_PV3D_File(data,'ModeFiltered')
 if function_switch_list[2] == 1:
@@ -237,7 +274,7 @@ if function_switch_list[2] == 1:
 	Write_PLY_File(data,'MedianFiltered')
 	Write_PV3D_File(data,'MedianFiltered')
 if function_switch_list[3] == 1:
-	data,grid_shape = Generate_Structured_Data(data,voxel_size)
+	data,grid_shape = Generate_Structured_Data(data,voxel_size,fill_holes,hole_neighbor_level)
 	Write_PLY_File(data,'StructuredData'+str(grid_shape[::-1]))
 	Write_CSV_File(data,'StructuredData'+str(grid_shape[::-1]))
 
